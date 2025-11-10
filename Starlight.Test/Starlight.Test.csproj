@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -34,7 +34,7 @@
     <EmbeddedResource Include="native\win-x86\lua54.dll" Condition="Exists('native\win-x86\lua54.dll')" />
   </ItemGroup>
 
-  <!-- Copy all native DLLs under native\** into the build/publish outputs -->
+  <!-- Copy all native DLLs under native\** into the build/publish outputs (no Condition) -->
   <ItemGroup>
     <None Include="native\**\*.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -50,17 +50,10 @@
 
     <MakeDir Directories="$(DepsFolder)" Condition="!Exists('$(DepsFolder)')" />
 
-    <!-- managed DLLs: exclude startup exe and native lua54.dll -->
     <ItemGroup>
-      <ManagedDllsToMove Include="$(SourceDir)**\*.dll"
-                         Exclude="$(SourceDir)$(TargetFileName);$(SourceDir)lua54.dll"
-                         Condition="Exists('$(SourceDir)')" />
       <PdbFilesToMove Include="$(SourceDir)**\*.pdb" Condition="Exists('$(SourceDir)')" />
       <NativeFilesToMove Include="$(SourceDir)lua54.dll" Condition="Exists('$(SourceDir)lua54.dll')" />
     </ItemGroup>
-
-    <Message Importance="Normal" Text="[MoveDepsToLibs_Build] Moving managed DLLs @(ManagedDllsToMove->'%(FullPath)') to $(DepsFolder)" Condition="@(ManagedDllsToMove) != ''" />
-    <Move SourceFiles="@(ManagedDllsToMove)" DestinationFolder="$(DepsFolder)" ContinueOnError="true" />
 
     <Message Importance="Normal" Text="[MoveDepsToLibs_Build] Moving @(PdbFilesToMove->'%(FullPath)') to $(DepsFolder)" Condition="@(PdbFilesToMove) != ''" />
     <Move SourceFiles="@(PdbFilesToMove)" DestinationFolder="$(DepsFolder)" ContinueOnError="true" />
@@ -79,15 +72,9 @@
     <MakeDir Directories="$(DepsFolder)" Condition="!Exists('$(DepsFolder)')" />
 
     <ItemGroup>
-      <ManagedDllsToMovePublish Include="$(SourceDir)**\*.dll"
-                                Exclude="$(SourceDir)$(TargetFileName);$(SourceDir)lua54.dll"
-                                Condition="Exists('$(SourceDir)')" />
       <PdbFilesToMovePublish Include="$(SourceDir)**\*.pdb" Condition="Exists('$(SourceDir)')" />
       <NativeFilesToMovePublish Include="$(SourceDir)lua54.dll" Condition="Exists('$(SourceDir)lua54.dll')" />
     </ItemGroup>
-
-    <Message Importance="Normal" Text="[MoveDepsToLibs_Publish] Moving managed DLLs @(ManagedDllsToMovePublish->'%(FullPath)') to $(DepsFolder)" Condition="@(ManagedDllsToMovePublish) != ''" />
-    <Move SourceFiles="@(ManagedDllsToMovePublish)" DestinationFolder="$(DepsFolder)" ContinueOnError="true" />
 
     <Message Importance="Normal" Text="[MoveDepsToLibs_Publish] Moving @(PdbFilesToMovePublish->'%(FullPath)') to $(DepsFolder)" Condition="@(PdbFilesToMovePublish) != ''" />
     <Move SourceFiles="@(PdbFilesToMovePublish)" DestinationFolder="$(DepsFolder)" ContinueOnError="true" />

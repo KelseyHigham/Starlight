@@ -5,7 +5,6 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Diagnostics;
 using Starlight.Asus.AnimeMatrix;
 using Starlight.Engine;
 
@@ -37,25 +36,6 @@ class Program
                 catch { }
                 return null;
             };
-        }
-
-        // Print loaded native modules for troubleshooting (helps diagnose BadImageFormat / wrong dll)
-        try
-        {
-            Console.WriteLine("Loaded native modules:");
-            var proc = Process.GetCurrentProcess();
-            foreach (ProcessModule mod in proc.Modules)
-            {
-                // show only native DLLs (you can remove condition to print everything)
-                if (mod.ModuleName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine($"{mod.ModuleName} -> {mod.FileName}");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Failed to enumerate native modules: {ex.Message}");
         }
 
         var scriptPath = args.Length > 0 ? args[0] : Path.Combine(exeDir, "anim.lua");
