@@ -1,24 +1,99 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- embed PDBs into the assembly -->
+    <DebugType>embedded</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Starlight.Engine\Starlight.Engine.csproj" />
+    <ProjectReference Include="..\Starlight\Starlight.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="StbImageSharp" Version="2.27.13" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="anim.lua">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- include both archs if you want to support x86/x64 at runtime -->
+    <EmbeddedResource Include="native\win-x64\lua54.dll" Condition="Exists('native\win-x64\lua54.dll')" />
+    <EmbeddedResource Include="native\win-x86\lua54.dll" Condition="Exists('native\win-x86\lua54.dll')" />
+  </ItemGroup>
+
+  <!-- Copy all native DLLs under native\** into the build/publish outputs -->
+  <ItemGroup>
+    <None Include="native\**\*.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Move deps (build output) -->
+  <Target Name="MoveDepsToLibs_Build" AfterTargets="CopyFilesToOutputDirectory">
     <PropertyGroup>
-        <OutputType>Exe</OutputType>
-        <TargetFramework>net7.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
+      <DepsFolder>$(TargetDir)libs\</DepsFolder>
+      <SourceDir>$(TargetDir)</SourceDir>
     </PropertyGroup>
 
+    <MakeDir Directories="$(DepsFolder)" Condition="!Exists('$(DepsFolder)')" />
+
+    <!-- managed DLLs: exclude startup exe and native lua54.dll -->
     <ItemGroup>
-      <ProjectReference Include="..\Starlight.Engine\Starlight.Engine.csproj" />
-      <ProjectReference Include="..\Starlight\Starlight.csproj" />
+      <ManagedDllsToMove Include="$(SourceDir)**\*.dll"
+                         Exclude="$(SourceDir)$(TargetFileName);$(SourceDir)lua54.dll"
+                         Condition="Exists('$(SourceDir)')" />
+      <PdbFilesToMove Include="$(SourceDir)**\*.pdb" Condition="Exists('$(SourceDir)')" />
+      <NativeFilesToMove Include="$(SourceDir)lua54.dll" Condition="Exists('$(SourceDir)lua54.dll')" />
     </ItemGroup>
 
-    <ItemGroup>
-      <PackageReference Include="StbImageSharp" Version="2.27.13" />
-    </ItemGroup>
+    <Message Importance="Normal" Text="[MoveDepsToLibs_Build] Moving managed DLLs @(ManagedDllsToMove->'%(FullPath)') to $(DepsFolder)" Condition="@(ManagedDllsToMove) != ''" />
+    <Move SourceFiles="@(ManagedDllsToMove)" DestinationFolder="$(DepsFolder)" ContinueOnError="true" />
+
+    <Message Importance="Normal" Text="[MoveDepsToLibs_Build] Moving @(PdbFilesToMove->'%(FullPath)') to $(DepsFolder)" Condition="@(PdbFilesToMove) != ''" />
+    <Move SourceFiles="@(PdbFilesToMove)" DestinationFolder="$(DepsFolder)" ContinueOnError="true" />
+
+    <Message Importance="Normal" Text="[MoveDepsToLibs_Build] Moving @(NativeFilesToMove->'%(FullPath)') to $(DepsFolder)" Condition="@(NativeFilesToMove) != ''" />
+    <Move SourceFiles="@(NativeFilesToMove)" DestinationFolder="$(DepsFolder)" ContinueOnError="true" />
+  </Target>
+
+  <!-- Move deps (publish output) -->
+  <Target Name="MoveDepsToLibs_Publish" AfterTargets="Publish">
+    <PropertyGroup>
+      <DepsFolder>$(PublishDir)libs\</DepsFolder>
+      <SourceDir>$(PublishDir)</SourceDir>
+    </PropertyGroup>
+
+    <MakeDir Directories="$(DepsFolder)" Condition="!Exists('$(DepsFolder)')" />
 
     <ItemGroup>
-      <None Update="anim.lua">
-        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-      </None>
+      <ManagedDllsToMovePublish Include="$(SourceDir)**\*.dll"
+                                Exclude="$(SourceDir)$(TargetFileName);$(SourceDir)lua54.dll"
+                                Condition="Exists('$(SourceDir)')" />
+      <PdbFilesToMovePublish Include="$(SourceDir)**\*.pdb" Condition="Exists('$(SourceDir)')" />
+      <NativeFilesToMovePublish Include="$(SourceDir)lua54.dll" Condition="Exists('$(SourceDir)lua54.dll')" />
     </ItemGroup>
+
+    <Message Importance="Normal" Text="[MoveDepsToLibs_Publish] Moving managed DLLs @(ManagedDllsToMovePublish->'%(FullPath)') to $(DepsFolder)" Condition="@(ManagedDllsToMovePublish) != ''" />
+    <Move SourceFiles="@(ManagedDllsToMovePublish)" DestinationFolder="$(DepsFolder)" ContinueOnError="true" />
+
+    <Message Importance="Normal" Text="[MoveDepsToLibs_Publish] Moving @(PdbFilesToMovePublish->'%(FullPath)') to $(DepsFolder)" Condition="@(PdbFilesToMovePublish) != ''" />
+    <Move SourceFiles="@(PdbFilesToMovePublish)" DestinationFolder="$(DepsFolder)" ContinueOnError="true" />
+
+    <Message Importance="Normal" Text="[MoveDepsToLibs_Publish] Moving @(NativeFilesToMovePublish->'%(FullPath)') to $(DepsFolder)" Condition="@(NativeFilesToMovePublish) != ''" />
+    <Move SourceFiles="@(NativeFilesToMovePublish)" DestinationFolder="$(DepsFolder)" ContinueOnError="true" />
+  </Target>
 
 </Project>

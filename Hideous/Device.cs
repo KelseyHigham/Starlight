@@ -1,4 +1,5 @@
-﻿using Hideous.Platform;
+﻿using System.Reflection;
+using Hideous.Platform;
 
 namespace Hideous
 {
@@ -24,26 +25,36 @@ namespace Hideous
 
         public T Feature<T>(params byte[] command) where T : FeaturePacket
         {
-            try
-            {
-                return (T)Activator.CreateInstance(typeof(T), command)!;
-            }
-            catch
-            {
-                return (T)Activator.CreateInstance(typeof(T))!;
-            }
+            return (T)CreateInstanceSafe(typeof(T), command)!;
         }
 
         public T Packet<T>(params byte[] command) where T : Packet
         {
-            try
+            return (T)CreateInstanceSafe(typeof(T), command)!;
+        }
+
+        private object? CreateInstanceSafe(Type type, byte[] command)
+        {
+            // Prefer a constructor whose first parameter is byte[] (or params byte[]).
+            var ctors = type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+            foreach (var ctor in ctors)
             {
-                return (T)Activator.CreateInstance(typeof(T), command)!;
+                var parameters = ctor.GetParameters();
+                if (parameters.Length >= 1 && parameters[0].ParameterType == typeof(byte[]))
+                {
+                    // Found a ctor that accepts byte[] as first parameter
+                    return ctor.Invoke(new object[] { command });
+                }
             }
-            catch
-            {
-                return (T)Activator.CreateInstance(typeof(T))!;
-            }
+
+            // Fallback: try parameterless constructor
+            var parameterless = type.GetConstructor(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null);
+            if (parameterless != null)
+                return parameterless.Invoke(null);
+
+            // As a last resort, attempt Activator (will throw if nothing matches)
+            return Activator.CreateInstance(type, nonPublic: true);
         }
 
         public void Set(FeaturePacket packet)
