@@ -1,21 +1,27 @@
-﻿using System;
+using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 using Starlight.Asus.AnimeMatrix;
 using Starlight.Engine;
 
-class Program
+static class Program
 {
-    // Keep native handle so the library stays loaded
     private static IntPtr _nativeLuaHandle = IntPtr.Zero;
-    static async Task<int> Main(string[] args)
+
+    [STAThread]
+    static void Main(string[] args)
     {
-        // Try to load lua54.dll from embedded resources (if present)
+        // Load native Lua if embedded
         TryLoadNativeFromResources("lua54.dll");
+
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
 
         var exeDir = AppContext.BaseDirectory;
         var libsDir = Path.Combine(exeDir, "libs");
@@ -38,154 +44,245 @@ class Program
             };
         }
 
-        var scriptPath = args.Length > 0 ? args[0] : Path.Combine(exeDir, "anim.lua");
-
-        Console.WriteLine($"Executable folder: {exeDir}");
-        Console.WriteLine($"Using script: {scriptPath}");
+        var scriptPath = args.Length > 0
+            ? args[0]
+            : Path.Combine(exeDir, "anim.lua");
 
         if (!File.Exists(scriptPath))
         {
-            Console.WriteLine("Script not found. Place a Lua file named 'anim.lua' next to the executable or pass a path as the first argument.");
-            return 1;
+            MessageBox.Show(
+                "Script not found.\nPlace 'anim.lua' next to the executable or pass a path as the first argument.",
+                "Starlight",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+            return;
         }
 
-        Console.WriteLine("Tip: run elevated and close Armoury Crate / ASUS RGB software if the device is locked.");
+        // Everything else runs inside an async context kicked off from here
+        RunTrayApp(scriptPath);
+    }
 
-        using var device = new AnimeMatrixDevice();
-        using var renderer = new AnimeMatrixRenderer(device);
+    private static void RunTrayApp(string scriptPath)
+    {
+        var exeDir = AppContext.BaseDirectory;
 
+        // Device and renderer
+        var device = new AnimeMatrixDevice();
+        var renderer = new AnimeMatrixRenderer(device);
+
+        // initial load
         try
         {
-            // initial load
-            try
-            {
-                renderer.LoadScript(scriptPath);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to load Lua script: {ex}");
-                return 2;
-            }
-
-            var cts = new CancellationTokenSource();
-            var reloadLock = new SemaphoreSlim(1, 1);
-            Task runTask = renderer.Run(30); // start renderer
-
-            // Setup file watcher
-            var watcher = new FileSystemWatcher(Path.GetDirectoryName(scriptPath) ?? exeDir)
-            {
-                Filter = Path.GetFileName(scriptPath),
-                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
-                EnableRaisingEvents = true,
-                IncludeSubdirectories = false
-            };
-
-            DateTime lastEvent = DateTime.MinValue;
-            const int debounceMs = 250;
-
-            FileSystemEventHandler onChange = (s, e) =>
-            {
-                var now = DateTime.UtcNow;
-                if ((now - lastEvent).TotalMilliseconds < debounceMs)
-                    return;
-                lastEvent = now;
-
-                // run reload on a background task to avoid blocking watcher thread
-                _ = Task.Run(async () =>
-                {
-                    await reloadLock.WaitAsync();
-                    try
-                    {
-                        Console.WriteLine($"Change detected ({e.ChangeType}). Reloading script...");
-                        // stop renderer and wait for loop to finish
-                        renderer.Stop();
-                        try { await runTask; } catch { /* ignore */ }
-
-                        // small delay to ensure file write is complete
-                        await Task.Delay(100);
-
-                        try
-                        {
-                            renderer.LoadScript(scriptPath);
-                            Console.WriteLine("Reloaded script successfully.");
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"Reload failed: {ex}");
-                        }
-
-                        // restart renderer
-                        runTask = renderer.Run(30);
-                    }
-                    finally
-                    {
-                        reloadLock.Release();
-                    }
-                });
-            };
-
-            RenamedEventHandler onRename = (s, e) =>
-            {
-                // treat rename as a change (file replaced)
-                onChange(s, new FileSystemEventArgs(WatcherChangeTypes.Changed, Path.GetDirectoryName(e.FullPath) ?? exeDir, Path.GetFileName(e.FullPath)));
-            };
-
-            watcher.Changed += onChange;
-            watcher.Created += onChange;
-            watcher.Renamed += onRename;
-
-            // Stop renderer on Ctrl+C or ENTER
-            var stopTcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            Console.CancelKeyPress += (s, e) =>
-            {
-                e.Cancel = true;
-                Console.WriteLine("Ctrl+C pressed — stopping...");
-                stopTcs.TrySetResult(null);
-            };
-
-            Console.WriteLine("Renderer started. Edit the Lua file to hot-reload. Press ENTER or Ctrl+C to stop.");
-
-            var readLineTask = Task.Run(() => Console.ReadLine());
-            var completed = await Task.WhenAny(readLineTask, stopTcs.Task);
-
-            // shutdown sequence
-            Console.WriteLine("Stopping renderer...");
-            watcher.EnableRaisingEvents = false;
-            watcher.Dispose();
-            cts.Cancel();
-
-            renderer.Stop();
-            try { await runTask; } catch { /* ignore */ }
-
-            Console.WriteLine("Renderer stopped.");
-            return 0;
+            renderer.LoadScript(scriptPath);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Runtime error: {ex}");
-            return 3;
+            MessageBox.Show(
+                $"Failed to load Lua script:\n{ex}",
+                "Starlight",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+            device.Dispose();
+            renderer.Dispose();
+            return;
         }
+
+        var reloadLock = new SemaphoreSlim(1, 1);
+        Task runTask = renderer.Run(30);
+
+        // File watcher for hot reload
+        var watcher = new FileSystemWatcher(Path.GetDirectoryName(scriptPath) ?? exeDir)
+        {
+            Filter = Path.GetFileName(scriptPath),
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
+            EnableRaisingEvents = true,
+            IncludeSubdirectories = false
+        };
+
+        DateTime lastEvent = DateTime.MinValue;
+        const int debounceMs = 250;
+
+        FileSystemEventHandler onChange = (s, e) =>
+        {
+            var now = DateTime.UtcNow;
+            if ((now - lastEvent).TotalMilliseconds < debounceMs)
+                return;
+            lastEvent = now;
+
+            _ = Task.Run(async () =>
+            {
+                await reloadLock.WaitAsync();
+                try
+                {
+                    renderer.Stop();
+                    try { await runTask; } catch { }
+
+                    await Task.Delay(100);
+
+                    try
+                    {
+                        renderer.LoadScript(scriptPath);
+                    }
+                    catch
+                    {
+                        // Keep black as error indicator.
+                        // Swallow here; user sees failure on the device.
+                    }
+
+                    runTask = renderer.Run(30);
+                }
+                finally
+                {
+                    reloadLock.Release();
+                }
+            });
+        };
+
+        RenamedEventHandler onRename = (s, e) =>
+        {
+            onChange(s, new FileSystemEventArgs(
+                WatcherChangeTypes.Changed,
+                Path.GetDirectoryName(e.FullPath) ?? exeDir,
+                Path.GetFileName(e.FullPath)
+            ));
+        };
+
+        watcher.Changed += onChange;
+        watcher.Created += onChange;
+        watcher.Renamed += onRename;
+
+        // Tray icon setup
+        var notifyIcon = new NotifyIcon
+        {
+            Visible = true,
+            Text = "Starlight AnimeMatrix"
+        };
+
+        var iconPath = Path.Combine(exeDir, "Starlight.ico");
+        try
+        {
+            if (File.Exists(iconPath))
+            {
+                notifyIcon.Icon = new System.Drawing.Icon(iconPath);
+            }
+            else
+            {
+                // Fallback to an embedded system icon to ensure something is visible
+                notifyIcon.Icon = System.Drawing.SystemIcons.Application;
+            }
+        }
+        catch
+        {
+            notifyIcon.Icon = System.Drawing.SystemIcons.Application;
+        }
+   
+        var menu = new ContextMenuStrip();
+
+        var editItem = new ToolStripMenuItem("Edit anim.lua");
+        editItem.Click += (s, e) =>
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = scriptPath,
+                    UseShellExecute = true
+                });
+            }
+            catch { }
+        };
+        menu.Items.Add(editItem);
+
+        var reloadItem = new ToolStripMenuItem("Reload now");
+        reloadItem.Click += async (s, e) =>
+        {
+            await reloadLock.WaitAsync();
+            try
+            {
+                renderer.Stop();
+                try { await runTask; } catch { }
+
+                try
+                {
+                    renderer.LoadScript(scriptPath);
+                }
+                catch
+                {
+                    // keep black on error
+                }
+
+                runTask = renderer.Run(30);
+            }
+            finally
+            {
+                reloadLock.Release();
+            }
+        };
+        menu.Items.Add(reloadItem);
+
+        menu.Items.Add(new ToolStripSeparator());
+
+        var exitItem = new ToolStripMenuItem("Exit");
+        exitItem.Click += async (s, e) =>
+        {
+            // Clean shutdown
+            watcher.EnableRaisingEvents = false;
+            watcher.Dispose();
+
+            renderer.Stop();
+            try { await runTask; } catch { }
+
+            notifyIcon.Visible = false;
+            notifyIcon.Dispose();
+
+            renderer.Dispose();
+            device.Dispose();
+
+            Application.Exit();
+        };
+        menu.Items.Add(exitItem);
+
+        notifyIcon.ContextMenuStrip = menu;
+
+        // Optional: double-click opens anim.lua
+        notifyIcon.DoubleClick += (s, e) => editItem.PerformClick();
+
+        // Start message loop (no window; tray-only)
+        Application.Run();
+
+        // Fallback cleanup if Application.Run exits other than via ExitItem
+        watcher.EnableRaisingEvents = false;
+        watcher.Dispose();
+
+        renderer.Stop();
+        try { runTask.Wait(500); } catch { }
+
+        notifyIcon.Visible = false;
+        notifyIcon.Dispose();
+
+        renderer.Dispose();
+        device.Dispose();
     }
 
     private static void TryLoadNativeFromResources(string nativeFileName)
     {
         var asm = Assembly.GetExecutingAssembly();
-        // choose resource by architecture if you embedded per-arch paths like "native.win-x64.lua54.dll"
         var resourceCandidates = asm.GetManifestResourceNames()
             .Where(n => n.EndsWith(nativeFileName, StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
         if (resourceCandidates.Length == 0)
-            return; // nothing embedded
+            return;
 
-        // Prefer x64 resource for 64-bit process, otherwise fallback
-        string chosen = null;
+        string? chosen;
         if (Environment.Is64BitProcess)
             chosen = resourceCandidates.FirstOrDefault(n => n.IndexOf("win-x64", StringComparison.OrdinalIgnoreCase) >= 0)
-                  ?? resourceCandidates.FirstOrDefault();
+                     ?? resourceCandidates.FirstOrDefault();
         else
             chosen = resourceCandidates.FirstOrDefault(n => n.IndexOf("win-x86", StringComparison.OrdinalIgnoreCase) >= 0)
-                  ?? resourceCandidates.FirstOrDefault();
+                     ?? resourceCandidates.FirstOrDefault();
 
         if (chosen == null)
             return;
@@ -194,27 +291,22 @@ class Program
         if (stream == null)
             return;
 
-        // Write to a temp file with .dll ext (can't load from stream directly)
         var tempDir = Path.Combine(Path.GetTempPath(), asm.GetName().Name + "_" + asm.GetName().Version);
         Directory.CreateDirectory(tempDir);
         var tempFile = Path.Combine(tempDir, nativeFileName);
 
-        // Overwrite to handle updates during development
         using (var fs = new FileStream(tempFile, FileMode.Create, FileAccess.Write, FileShare.None))
         {
             stream.CopyTo(fs);
         }
 
-        // Load native library and keep handle
         try
         {
             _nativeLuaHandle = NativeLibrary.Load(tempFile);
-            // optionally mark file for deletion on exit (Windows will not delete while loaded).
-            // Could schedule cleanup of tempDir on application exit.
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to load embedded native {nativeFileName}: {ex.Message}");
+            Debug.WriteLine($"Failed to load embedded native {nativeFileName}: {ex.Message}");
         }
     }
 }
