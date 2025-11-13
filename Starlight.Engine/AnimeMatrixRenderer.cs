@@ -31,24 +31,40 @@ namespace Starlight.Engine
 
         public void LoadScript(string fileName)
         {
+            // Always go through Reset: stops loop, clears display, fresh Lua
             Reset();
 
-            Lua!.DoFile(fileName);
-            _initCallback = Lua["init"] as LuaFunction;
-            _pixelCallback = Lua["pixel"] as LuaFunction;
-
-            if (_pixelCallback == null)
+            try
             {
-                throw new InvalidOperationException("`function pixel(x,y)' is missing from your script.");
-            }
+                Lua!.DoFile(fileName);
+                _initCallback = Lua["init"] as LuaFunction;
+                _pixelCallback = Lua["pixel"] as LuaFunction;
 
-            _initCallback?.Call();
+                if (_pixelCallback == null)
+                    throw new InvalidOperationException("`function pixel(x,y)` is missing from your script.");
+
+                _initCallback?.Call();
+            }
+            catch
+            {
+                // On error:
+                // - We already cleared screen in Reset() => black as error indicator.
+                // - Leave callbacks null so Run() cannot start with a bad state.
+                _pixelCallback = null;
+                _initCallback = null;
+                throw;
+            }
         }
+
 
         public async Task Run(double framerate = 30)
         {
             if (Running)
                 return;
+
+            // Do not start if no valid pixel() is loaded
+            if (_pixelCallback == null)
+                throw new InvalidOperationException("Cannot start renderer: no valid Lua pixel(x,y) function loaded.");
 
             _oldFrameTime = DateTime.Now;
             _nowFrameTime = DateTime.Now;
@@ -62,6 +78,7 @@ namespace Starlight.Engine
                 await Task.Delay((int)((1 / framerate) * 1000));
             }
         }
+
 
         public void Stop()
         {
@@ -108,22 +125,28 @@ namespace Starlight.Engine
 
             TotalFrames = 0;
             Time = 0;
+            DeltaTime = 0;
 
+            // fresh Lua state
             Lua = new(true);
-            Lua["_frames"] = 0;
-            Lua["_time"] = 0;
-            Lua["_delta"] = 0;
+            Lua["_frames"] = 0UL;
+            Lua["_time"] = 0.0;
+            Lua["_delta"] = 0.0;
             Lua["_rows"] = _device.Rows;
             Lua["columns"] = Lua.RegisterFunction(
                 "columns",
                 this,
                 GetType().GetMethod(
                     nameof(AnimeColumns),
-                    BindingFlags.NonPublic
-                    | BindingFlags.Instance
-                )
+                    BindingFlags.NonPublic | BindingFlags.Instance
+                )!
             );
+
+            // no script bound yet
+            _pixelCallback = null;
+            _initCallback = null;
         }
+
 
         private int AnimeColumns(int row)
             => _device.Columns(row);
