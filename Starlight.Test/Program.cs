@@ -160,23 +160,17 @@ static class Program
             Text = "Starlight AnimeMatrix"
         };
 
-        var iconPath = Path.Combine(exeDir, "Starlight.ico");
-        try
+        // Use the application's own icon (embedded via ApplicationIcon)
+        var appIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        if (appIcon != null)
         {
-            if (File.Exists(iconPath))
-            {
-                notifyIcon.Icon = new System.Drawing.Icon(iconPath);
-            }
-            else
-            {
-                // Fallback to an embedded system icon to ensure something is visible
-                notifyIcon.Icon = System.Drawing.SystemIcons.Application;
-            }
+            notifyIcon.Icon = appIcon;
         }
-        catch
+        else
         {
             notifyIcon.Icon = System.Drawing.SystemIcons.Application;
         }
+
    
         var menu = new ContextMenuStrip();
 

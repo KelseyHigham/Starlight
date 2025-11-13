@@ -5,6 +5,7 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>Starlight.ico</ApplicationIcon>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -41,12 +42,6 @@
     </None>
   </ItemGroup>
   
-  <ItemGroup>
-    <Content Include="Starlight.ico">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-
   <!-- Move deps (build output) -->
   <Target Name="MoveDepsToLibs_Build" AfterTargets="CopyFilesToOutputDirectory">
     <PropertyGroup>
